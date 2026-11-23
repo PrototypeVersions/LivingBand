@@ -1,13 +1,14 @@
-// A chart entry is a major or minor chord and its duration in quarter notes.
+import {chordTones} from './music.js?v=colors2';
+// A chart entry is a chord and its duration in quarter notes.
 export function parseChart(text){
   const entries=text.trim().split(/[\s,|]+/).filter(Boolean);
   if(!entries.length)throw Error('Enter at least one chord.');
   return entries.map(entry=>{
-    const m=/^([A-Ga-g])([#♯b♭]?)(m?)(?::([1-9]\d?))?$/.exec(entry);
-    if(!m)throw Error('Check “'+entry+'”. Use a major or minor chord such as C, F#m or Am:2.');
+    const m=/^([A-Ga-g])([#♯b♭]?)(maj7|sus2|sus4|m|)(?::([1-9]\d?))?$/.exec(entry);
+    if(!m)throw Error('Check “'+entry+'”. Use major, minor, sus2, sus4 or maj7, optionally followed by a beat count.');
     const accidental=m[2] ? ('#♯'.includes(m[2]) ? 1 : -1) : 0;
     const root=({C:0,D:2,E:4,F:5,G:7,A:9,B:11}[m[1].toUpperCase()]+accidental+12)%12;
-    return {name:m[1].toUpperCase()+m[2]+m[3],root,third:m[3]?3:4,beats:Number(m[4]||4)};
+    return {name:m[1].toUpperCase()+m[2]+m[3],root,intervals:chordTones[m[3]],beats:Number(m[4]||4)};
   });
 }
 export function capturedChart(events,end,bpm){
@@ -39,7 +40,7 @@ export function startGroove(band,chart,bpm,onBeat){
       display.push({at,name:count<0?'—':chord.name,beat:count<0?'Count-in '+(count+5)+'/4':'Beat '+(within+1)+' of '+chord.beats});
       if(count<0)band.tone(count===-4?86:81,'sine',band.master,.14,at,.002,.06);
       else{
-        if(within===0)for(const interval of [0,chord.third,7]){
+        if(within===0)for(const interval of chord.intervals){
           band.tone(60+chord.root+interval,'triangle',band.pad,.045,at,.055,Math.max(.18,beat*chord.beats));
         }
         band.tone(36+chord.root+(within%4===2?7:0),'sine',band.low,.24,at,.008,beat*.84);

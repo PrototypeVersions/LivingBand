@@ -2,14 +2,14 @@
 import { hear, Player, frequency } from '../music.js';
 
 const rate = 48000, size = 4096, hop = 960;
-const chords = {Em:[40,47,52,55,59,64], C:[48,52,55,60,64], Am:[45,52,57,60,64]};
+const chords = {Em:[40,47,52,55,59,64], C:[48,52,55,60,64], Am:[45,52,57,60,64], Asus2:[45,52,57,59,64], Fmaj7:[53,57,60,64]};
 const progression = ['Em','C','Am','C','Em'];
 
 // Render continuous downstrokes with uneven string levels and a delayed copy.
 // Each section lasts one second, with no silence at the chord boundary.
-function strums(wet, quietA) {
-  const dry = new Float64Array(rate * progression.length);
-  progression.forEach((name, section) => {
+function strums(wet, quietA, sequence=progression) {
+  const dry = new Float64Array(rate * sequence.length);
+  sequence.forEach((name, section) => {
     for (const beat of [0,.37,.72]) chords[name].forEach((midi,string) => {
       const start = Math.floor(rate*(section+beat+.013*string));
       const amplitude = [.15,.44,.33,.5,.48,.29][string] * (quietA && name==='Am' && midi%12===9 ? .24 : 1);
@@ -45,17 +45,18 @@ function spectrum(samples, end) {
   }
   return re.slice(0,size/2).map((v,i)=>20*Math.log10(Math.hypot(v,im[i])/size));
 }
-for (const [wet,quietA] of [[false,false],[true,false],[true,true]]){
-  const samples=strums(wet,quietA), player=new Player(), changes=[];
+const suspended=['Asus2','Fmaj7','Asus2','Fmaj7'];
+for (const [wet,quietA,sequence] of [[false,false,progression],[true,false,progression],[true,true,progression],[false,false,suspended],[true,false,suspended]]){
+  const samples=strums(wet,quietA,sequence), player=new Player(), changes=[];
   for(let end=hop;end<samples.length;end+=hop){
     const level=Math.sqrt(samples.subarray(end-1024,end).reduce((sum,v)=>sum+v*v,0)/1024);
-    for(const event of player.step(end/rate,level,hear(spectrum(samples,end),rate/size))){
+    for(const event of player.step(end/rate,level,hear(spectrum(samples,end),rate/size,null,player.harmony))){
       if(event.kind==='chord')changes.push({at:end/rate,name:event.chord});
     }
   }
   console.log(quietA?'Echo with quiet A strings':wet?'Echo':'Dry',JSON.stringify(changes));
-  if(changes.map(c=>c.name).join()!==progression.join() ||
-     changes.some((c,i)=>c.at-i>(quietA ? .55 : .25) || c.at<i))throw Error('Continuous strum tracking failed');
+  if(changes.map(c=>c.name).join()!==sequence.join() ||
+     changes.some((c,i)=>c.at-i>(quietA ? .55 : wet && sequence===suspended ? .35 : .25) || c.at<i))throw Error('Continuous strum tracking failed');
 }
 
 // Check the learned voicing across a new take with echo, including adjacent C chords.

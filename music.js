@@ -1,8 +1,9 @@
 export const names = ['C','C♯','D','E♭','E','F','F♯','G','A♭','A','B♭','B'];
+export const chordTones = {"":[0,4,7],m:[0,3,7],sus2:[0,2,7],sus4:[0,5,7],maj7:[0,4,7,11]};
 export const frequency = n => 440 * 2 ** ((n - 69) / 12);
 
 // Interpolate spectral peaks, then discount the expected overtones of lower strings.
-export function hear(db, hzPerBin, learnedAm = null) {
+export function hear(db, hzPerBin, learnedAm = null, previous = null) {
   const peaks = [];
   for (let i = Math.max(2, Math.floor(73/hzPerBin)); i < Math.min(db.length-1, 1600/hzPerBin); i++) {
     const y = db[i], left = db[i-1], right = db[i+1];
@@ -40,8 +41,8 @@ export function hear(db, hzPerBin, learnedAm = null) {
   const possibleAm = Math.min(...amTones) > .025 && amTones.reduce((a,b)=>a+b,0) > .61;
   const evidence = {fingerprint,possibleAm};
   const options = [];
-  for (let root=0;root<12;root++) for (const third of [3,4]) {
-    const tones = [root,(root+third)%12,(root+7)%12].map(n=>chroma[n]/total);
+  for (let root=0;root<12;root++) for (const [suffix,intervals] of Object.entries(chordTones)) {
+    const tones = intervals.map(i=>chroma[(root+i)%12]/total);
     const weakest = Math.min(...tones);
     if (weakest < .055) continue;
     const coverage = tones.reduce((a,b)=>a+b,0);
@@ -49,15 +50,23 @@ export function hear(db, hzPerBin, learnedAm = null) {
     // Give each supported open voicing the same bounded root bonus.
     const bassMidi=[40,45,50,43,48].find(n=>n%12===root);
     const voicing=bassMidi===undefined?0:Math.min(fingerprint[bassMidi-40],fingerprint[bassMidi+12-40])*.30;
-    const learned=root===9 && third===3 && learnedAm && possibleAm
+    const learned=root===9 && suffix==="m" && learnedAm && possibleAm
       ? Math.max(0,similarity(fingerprint,learnedAm)-.88)*.55 : 0;
-    const score=coverage+.35*weakest+(lowest%12===root?.075:0)+voicing+learned;
-    options.push({root,third,score});
+    const straySeventh=previous && previous.root!==root &&
+      previous.intervals.some(i=>(previous.root+i)%12===(root+11)%12);
+    const complexity=intervals.length===4?(straySeventh?.21:.075):0;
+    // A suspended chord can briefly resemble its parallel minor as strings overlap.
+    const unsettled=previous?.suffix.startsWith('sus') && previous.root===root && suffix==='m' &&
+      (lowest%12!==root || chroma[(root+2)%12]/total>.065);
+    const score=coverage-complexity+.35*weakest+(lowest%12===root?.075:0)+voicing+learned;
+    options.push({root,suffix,intervals,score,unsettled});
   }
   options.sort((a,b)=>b.score-a.score);
   const best = options[0];
-  if (best && best.score-(options[1]?.score || 0)>.045)
-    return {...evidence,chord:names[best.root]+(best.third===3?'m':''),root:best.root,third:best.third};
+  const runner=options[1];
+  const margin=runner?.intervals.length===4 || runner?.suffix.startsWith('sus') ? .008 : .045;
+  if (best && best.score-(runner?.score || 0)>margin)
+    return {...evidence,chord:names[best.root]+best.suffix,root:best.root,suffix:best.suffix,intervals:best.intervals,unsettled:best.unsettled};
   if (chroma[sorted[0].midi%12]/total>.70) return {...evidence,note:sorted[0].midi};
   return evidence;
 }
@@ -75,13 +84,21 @@ export class Player {
     if(level>.002){
       const attack=level>Math.max(.002,this.previousLevel*1.75);
       this.lastSound=t;
+      if(heard.chord!==this.candidate){
+        this.candidate=heard.chord;this.candidateSince=t;
+      }
       if(heard.chord){
         this.phrase=[];this.note=null;
         this.votes.push({t,chord:heard.chord});
         const matching=this.votes.filter(v=>v.chord===heard.chord);
-        if(matching.length>=3 && t-matching[0].t>=.038 &&
+        // Asus2 and Esus4 contain exactly the same notes. Require a sustained
+        // change of bass before relabeling the same set during a transition.
+        const sameNotes=this.harmony && this.harmony.root!==heard.root &&
+          heard.intervals.length===this.harmony.intervals.length &&
+          heard.intervals.every(i=>this.harmony.intervals.includes((heard.root+i-this.harmony.root+12)%12));
+        if((!(sameNotes || heard.unsettled) || t-this.candidateSince>.18) && matching.length>=3 && t-matching[0].t>=.038 &&
            matching.length>this.votes.length/2 && this.current!==heard.chord){
-          this.current=heard.chord;events.push({kind:'chord',...heard});
+          this.current=heard.chord;this.harmony=heard;events.push({kind:'chord',...heard});
         }
       }else{
         if(heard.note!=null && (this.note!==heard.note || attack) && t-this.lastAttack>.095){
@@ -91,12 +108,12 @@ export class Player {
       }
       events.push({kind:'playing'});
     }else{
-      this.note=null;
+      this.note=null;this.candidate=null;
       if(t-this.lastSound>.43 && this.phrase.length){
         if(this.phrase.length>=2) events.push({kind:'answer',phrase:this.phrase});
         this.phrase=[];
       }
-      if(t-this.lastSound>1.2 && this.current){this.current='';events.push({kind:'rest'});}
+      if(t-this.lastSound>1.2 && this.current){this.current='';this.harmony=null;events.push({kind:'rest'});}
     }
     this.previousLevel=level;
     return events;

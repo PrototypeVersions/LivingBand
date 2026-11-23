@@ -26,10 +26,10 @@ export class Ensemble {
       env.gain.cancelAndHoldAtTime(now);env.gain.linearRampToValueAtTime(0,now+seconds);osc.stop(now+seconds+.02);
     }
   }
-  chord(root,third){
+  chord(root,intervals){
     this.release(this.voices,.08);
     const t=this.ctx.currentTime;
-    for(const offset of [0,third,7,12]){
+    for(const offset of [...intervals,12]){
       const n=60+root+offset;
       this.voices.push(this.tone(n,'sine',this.pad,.043,t,.085),this.tone(n,'triangle',this.pad,.016,t,.16,Infinity,4));
     }

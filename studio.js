@@ -1,6 +1,6 @@
-import {hear, Player, names} from './music.js?v=groove';
-import {Ensemble} from './ensemble.js?v=quick';
-import {parseChart,capturedChart,startGroove} from './backing.js';
+import {hear, Player, names} from './music.js?v=colors2';
+import {Ensemble} from './ensemble.js?v=colors2';
+import {parseChart,capturedChart,startGroove} from './backing.js?v=colors2';
 import {estimateTempo,StrumTimes} from './tempo.js';
 const el=id=>document.getElementById(id);
 let session=null, token=0;
@@ -108,7 +108,7 @@ function tick(s){
   if(s.demo&&t>=s.nextDemo-.3){demoCycle(s,s.nextDemo);s.nextDemo+=9;}
   s.an.getFloatTimeDomainData(s.wave);s.an.getFloatFrequencyData(s.bins);
   let energy=0;for(let i=s.wave.length-1024;i<s.wave.length;i++)energy+=s.wave[i]**2;
-  const level=Math.sqrt(energy/1024), heard=level>.002?hear(s.bins,s.ctx.sampleRate/s.an.fftSize,s.learnedAm):{};
+  const level=Math.sqrt(energy/1024), heard=level>.002?hear(s.bins,s.ctx.sampleRate/s.an.fftSize,s.learnedAm,s.player.harmony):{};
   if(s.strums)s.strums.observe(t,s.bins,s.ctx.sampleRate/s.an.fftSize,level);
   if(s.learning) collectAm(s,t,heard);
   draw(s.wave.subarray(s.wave.length-1024));
@@ -118,7 +118,7 @@ function tick(s){
     if(event.kind==='chord'){
       if(s.capture){if(s.capture.at(-1)?.name!==event.chord)s.capture.push({at:t,name:event.chord});
         el('chartStatus').textContent=s.capture.map(c=>c.name).join('  ·  ');}
-      else s.band.chord(event.root,event.third);
+      else s.band.chord(event.root,event.intervals);
       el('chord').textContent=event.chord;}
     if(event.kind==='answer'&&!s.capture&&el('reply').checked)s.replyEnd=s.band.answer(event.phrase);
     if(event.kind==='rest'){s.band.release(s.band.voices,.55);el('chord').textContent='—';}
