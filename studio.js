@@ -1,4 +1,4 @@
-import {hear, Player, names} from './music.js';
+import {hear, Player, names} from './music.js?v=strums';
 import {Ensemble} from './ensemble.js';
 const el=id=>document.getElementById(id);
 let session=null, token=0;
@@ -47,7 +47,12 @@ function levels(s,values){
     }
     const preferred=/tone master/i.test(s.label)&&values.length>=3?2:0;
     el('channel').selectedIndex=preferred;s.tap.port.postMessage(preferred);el('channel').disabled=values.length<2;
-    if(!s.demo)el('status').textContent=s.label+' · '+values.length+' input channel'+(values.length===1?'':'s')+' available. Pick a note to check the meters.';
+    if(!s.demo){
+      const hint=/tone.?master/i.test(s.label) && values.length===2
+        ? ' For standard TMP routing these are processed L/R. Try a clean preset with delay and reverb off.'
+        : ' Pick a note to check the meters.';
+      el('status').textContent=s.label+' · '+values.length+' input channel'+(values.length===1?'':'s')+' available.'+hint;
+    }
   }
   values.forEach((v,i)=>{meters.children[i].lastChild.value=Math.min(1,Math.max(0,(20*Math.log10(v+1e-8)+66)/66));});
 }
