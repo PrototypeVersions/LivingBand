@@ -1,7 +1,7 @@
 // Run with node --experimental-default-type=module tests/chord-changes.mjs
 import { hear, Player, frequency } from '../music.js';
 
-const rate = 48000, size = 8192, hop = 2160;
+const rate = 48000, size = 4096, hop = 960;
 const chords = {Em:[40,47,52,55,59,64], C:[48,52,55,60,64], Am:[45,52,57,60,64]};
 const progression = ['Em','C','Am','C','Em'];
 
@@ -55,5 +55,16 @@ for (const [wet,quietA] of [[false,false],[true,false],[true,true]]){
   }
   console.log(quietA?'Echo with quiet A strings':wet?'Echo':'Dry',JSON.stringify(changes));
   if(changes.map(c=>c.name).join()!==progression.join() ||
-     changes.some((c,i)=>c.at-i>.65 || c.at<i))throw Error('Continuous strum tracking failed');
+     changes.some((c,i)=>c.at-i>(quietA ? .55 : .25) || c.at<i))throw Error('Continuous strum tracking failed');
+}
+
+// Check the learned voicing across a new take with echo, including adjacent C chords.
+const example = strums(false,true);
+const reference = hear(spectrum(example,Math.round(2.53*rate)),rate/size);
+if(!reference.possibleAm) throw Error('Quiet Am cannot be learned');
+const take = strums(true,true);
+for(const [section,expected] of progression.entries()){
+  const bins=spectrum(take,Math.round((section+.56)*rate));
+  const heard=hear(bins,rate/size,reference.fingerprint);
+  if(heard.chord!==expected) throw Error('Learned Am interfered with '+expected);
 }

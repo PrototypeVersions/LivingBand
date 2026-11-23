@@ -1,5 +1,5 @@
-import {hear, Player, names} from './music.js?v=strums';
-import {Ensemble} from './ensemble.js';
+import {hear, Player, names, similarity} from './music.js?v=quick';
+import {Ensemble} from './ensemble.js?v=quick';
 const el=id=>document.getElementById(id);
 let session=null, token=0;
 const meters=el('meters'), canvas=el('scope'), pen=canvas.getContext('2d');
@@ -29,10 +29,12 @@ function stop(message='Session stopped.'){
   if(old){clearInterval(old.timer);old.stream?.getTracks().forEach(t=>t.stop());old.ctx.close().catch(()=>{});}
   el('live').disabled=el('demo').disabled=false;el('stop').disabled=true;
   el('channel').disabled=true;el('channel').replaceChildren(new Option('Waiting for audio'));
+  el('learn').disabled=true;el('learnInfo').textContent='';
   meters.replaceChildren();el('note').textContent=el('chord').textContent='—';
   el('action').textContent='Resting';el('badge').textContent='Standby';el('status').textContent=message;draw();
 }
 function resetListener(s){
+  s.learning=null;s.learnedAm=null;el('learnInfo').textContent='';el('learn').disabled=s.demo;
   s.player=new Player();s.band.release(s.band.voices,.08);s.band.release(s.band.responses,.04);
   s.replyEnd=0;el('note').textContent=el('chord').textContent='—';el('action').textContent='Listening';
 }
@@ -62,12 +64,37 @@ function demoCycle(s,t){
     for(const [i,n] of notes.entries())synth.tone(n,'triangle',s.source,.075,t+at+i*.018,.012,notes.length>1?1.72:.26);
   }
 }
+// Store a unit-length spectral profile for this input and session only.
+function collectAm(s,t,heard){
+  const capture=s.learning;
+  if(t>capture.deadline){
+    s.learning=null;el('learn').disabled=false;
+    el('learnInfo').textContent='No stable Am captured. Click again, then strum Am and let it ring.';
+    return;
+  }
+  if(!heard.possibleAm || !heard.fingerprint){capture.frames=[];return;}
+  const frames=capture.frames, frame=heard.fingerprint;
+  if(frames.length && similarity(frames[0],frame)<.88)frames.length=0;
+  frames.push(frame);
+  if(frames.length<10)return;
+  const mean=new Float32Array(frame.length);
+  for(const sample of frames) sample.forEach((v,i)=>{mean[i]+=v;});
+  const norm=Math.hypot(...mean);
+  s.learnedAm=mean.map(v=>v/norm);s.learning=null;
+  el('learn').disabled=false;el('learnInfo').textContent='Your Am is learned for this session.';
+}
+el('learn').onclick=()=>{
+  if(!session || session.demo)return;
+  session.learning={frames:[],deadline:session.ctx.currentTime+10};
+  el('learn').disabled=true;el('learnInfo').textContent='Strum your Am now and let it ring.';
+};
 function tick(s){
   const t=s.ctx.currentTime;
   if(s.demo&&t>=s.nextDemo-.3){demoCycle(s,s.nextDemo);s.nextDemo+=9;}
   s.an.getFloatTimeDomainData(s.wave);s.an.getFloatFrequencyData(s.bins);
   let energy=0;for(let i=s.wave.length-1024;i<s.wave.length;i++)energy+=s.wave[i]**2;
-  const level=Math.sqrt(energy/1024), heard=level>.002?hear(s.bins,s.ctx.sampleRate/s.an.fftSize):{};
+  const level=Math.sqrt(energy/1024), heard=level>.002?hear(s.bins,s.ctx.sampleRate/s.an.fftSize,s.learnedAm):{};
+  if(s.learning) collectAm(s,t,heard);
   draw(s.wave.subarray(s.wave.length-1024));
   el('note').textContent=heard.note==null?'—':names[heard.note%12]+(Math.floor(heard.note/12)-1);
   for(const event of s.player.step(t,level,heard)){
@@ -102,13 +129,14 @@ async function start(demo){
     }
     s.tap=new AudioWorkletNode(ctx,'channel-tap',{channelCountMode:'max',channelInterpretation:'discrete',outputChannelCount:[1]});
     s.tap.port.onmessage=e=>levels(s,e.data);
-    s.an=ctx.createAnalyser();s.an.fftSize=8192;s.an.smoothingTimeConstant=0;
+    s.an=ctx.createAnalyser();s.an.fftSize=ctx.sampleRate>64000?8192:4096;s.an.smoothingTimeConstant=0;
     const mute=ctx.createGain();mute.gain.value=0;
     s.source.connect(s.tap).connect(s.an).connect(mute).connect(ctx.destination);
     s.bins=new Float32Array(s.an.frequencyBinCount);s.wave=new Float32Array(s.an.fftSize);
     el('badge').textContent=demo?'Demo playing':'Live input';el('action').textContent='Listening';
     el('status').textContent=demo?'Demo guitar plays two chords and a short phrase, then leaves room for the band.':'Pick a note to check the input.';
-    s.timer=setInterval(()=>tick(s),45);
+    el('learn').disabled=demo;
+    s.timer=setInterval(()=>tick(s),20);
   }catch(e){if(id===token)stop(e.name==='NotAllowedError'?'Audio access was blocked. Allow microphone access for this page in Chrome, or play the demo.':'Could not start audio. '+e.message);}
 }
 el('live').onclick=()=>start(false);el('demo').onclick=()=>start(true);el('stop').onclick=()=>stop();

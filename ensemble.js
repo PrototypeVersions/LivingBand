@@ -27,13 +27,13 @@ export class Ensemble {
     }
   }
   chord(root,third){
-    this.release(this.voices,.36);
+    this.release(this.voices,.08);
     const t=this.ctx.currentTime;
     for(const offset of [0,third,7,12]){
       const n=60+root+offset;
-      this.voices.push(this.tone(n,'sine',this.pad,.043,t,.43),this.tone(n,'triangle',this.pad,.016,t,.65,Infinity,4));
+      this.voices.push(this.tone(n,'sine',this.pad,.043,t,.085),this.tone(n,'triangle',this.pad,.016,t,.16,Infinity,4));
     }
-    this.voices.push(this.tone(36+root,'sine',this.low,.095,t,.26));
+    this.voices.push(this.tone(36+root,'sine',this.low,.095,t,.038));
   }
   answer(phrase){
     this.release(this.responses,.05);

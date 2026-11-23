@@ -2,7 +2,7 @@ export const names = ['C','C♯','D','E♭','E','F','F♯','G','A♭','A','B♭'
 export const frequency = n => 440 * 2 ** ((n - 69) / 12);
 
 // Interpolate spectral peaks, then discount the expected overtones of lower strings.
-export function hear(db, hzPerBin) {
+export function hear(db, hzPerBin, learnedAm = null) {
   const peaks = [];
   for (let i = Math.max(2, Math.floor(73/hzPerBin)); i < Math.min(db.length-1, 1600/hzPerBin); i++) {
     const y = db[i], left = db[i-1], right = db[i+1];
@@ -21,14 +21,26 @@ export function hear(db, hzPerBin) {
   if (!sorted.length) return {};
   const chroma = new Float32Array(12);
   const strongest = sorted[0].power;
+  const fingerprint = new Float32Array(44); // E2 through B5, with octave information.
   let lowest = Infinity;
   for (const peak of sorted) {
-    if (peak.power < strongest * .055) continue;
+    const relative = peak.power / strongest;
+    const index = peak.midi - 40;
+    if (index >= 0 && index < fingerprint.length && relative > .025)
+      fingerprint[index] = Math.max(fingerprint[index], Math.sqrt(relative));
+    if (relative < .045) continue;
     // Compress string-to-string differences before folding octaves together.
     chroma[peak.midi % 12] += Math.sqrt(peak.power / strongest);
     if (peak.power >= strongest * .09) lowest = Math.min(lowest, peak.midi);
   }
   const total = chroma.reduce((a,b)=>a+b,0);
+  const norm = Math.hypot(...fingerprint);
+  if (norm) for (let i=0;i<fingerprint.length;i++) fingerprint[i] /= norm;
+  const amTones = [9,0,4].map(n=>chroma[n]/total);
+  const possibleAm = Math.min(...amTones) > .025 && amTones.reduce((a,b)=>a+b,0) > .61;
+  const evidence = {fingerprint,possibleAm};
+  if (learnedAm && possibleAm && similarity(fingerprint,learnedAm) > .93)
+    return {...evidence,chord:'Am',root:9,third:3};
   const options = [];
   for (let root=0;root<12;root++) for (const third of [3,4]) {
     const tones = [root,(root+third)%12,(root+7)%12].map(n=>chroma[n]/total);
@@ -37,15 +49,23 @@ export function hear(db, hzPerBin) {
     const coverage = tones.reduce((a,b)=>a+b,0);
     if (coverage < .69) continue;
     // Root-position bass breaks close ties when two chord tones carry over.
-    const score = coverage + .35*weakest + (lowest%12===root ? .075 : 0);
+    // C and Am share C4 and E4. Open A2 plus fretted A3 are independent
+    // evidence for Am, even through a preset that emphasizes the high strings.
+    const openAm = root===9 && third===3
+      ? Math.min(fingerprint[45-40],fingerprint[57-40])*.55 : 0;
+    const score = openAm + coverage + .35*weakest + (lowest%12===root ? .075 : 0);
     options.push({root,third,score});
   }
   options.sort((a,b)=>b.score-a.score);
   const best = options[0];
   if (best && best.score-(options[1]?.score || 0)>.045)
-    return {chord:names[best.root]+(best.third===3?'m':''),root:best.root,third:best.third};
-  if (chroma[sorted[0].midi%12]/total>.70) return {note:sorted[0].midi};
-  return {};
+    return {...evidence,chord:names[best.root]+(best.third===3?'m':''),root:best.root,third:best.third};
+  if (chroma[sorted[0].midi%12]/total>.70) return {...evidence,note:sorted[0].midi};
+  return evidence;
+}
+
+export function similarity(a,b) {
+  return a.reduce((sum,value,i)=>sum+value*b[i],0);
 }
 
 export class Player {
@@ -53,7 +73,7 @@ export class Player {
   step(t,level,heard){
     const events=[];
     // Keep recent observations across uncertain frames and between pick attacks.
-    this.votes=this.votes.filter(v=>t-v.t<=.26);
+    this.votes=this.votes.filter(v=>t-v.t<=.13);
     if(level>.002){
       const attack=level>Math.max(.002,this.previousLevel*1.75);
       this.lastSound=t;
@@ -61,7 +81,7 @@ export class Player {
         this.phrase=[];this.note=null;
         this.votes.push({t,chord:heard.chord});
         const matching=this.votes.filter(v=>v.chord===heard.chord);
-        if(matching.length>=3 && t-matching[0].t>=.085 &&
+        if(matching.length>=3 && t-matching[0].t>=.038 &&
            matching.length>this.votes.length/2 && this.current!==heard.chord){
           this.current=heard.chord;events.push({kind:'chord',...heard});
         }
