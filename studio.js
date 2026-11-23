@@ -7,10 +7,10 @@ function draw(samples){
   const w=canvas.clientWidth,h=canvas.clientHeight,scale=devicePixelRatio||1;
   if(canvas.width!==Math.round(w*scale)||canvas.height!==Math.round(h*scale)){canvas.width=Math.round(w*scale);canvas.height=Math.round(h*scale);}
   pen.setTransform(scale,0,0,scale,0,0);pen.clearRect(0,0,w,h);
-  pen.strokeStyle='#4a695b';pen.lineWidth=.6;pen.beginPath();
+  pen.strokeStyle='#48516f';pen.lineWidth=.6;pen.beginPath();
   for(let x=0;x<w;x+=24){pen.moveTo(x,0);pen.lineTo(x,h);}
   for(let y=h/6;y<h;y+=h/3){pen.moveTo(0,y);pen.lineTo(w,y);}
-  pen.stroke();pen.strokeStyle='#c3eeb5';pen.lineWidth=1.6;pen.beginPath();
+  pen.stroke();pen.strokeStyle='#9de8ef';pen.lineWidth=1.6;pen.beginPath();
   for(let x=0;x<w;x++){const s=samples?.[Math.floor(x/w*1024)]||0;const y=h*(.5-.45*Math.tanh(s*9));if(x)pen.lineTo(x,y);else pen.moveTo(x,y);}
   pen.stroke();
 }
