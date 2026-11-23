@@ -39,8 +39,6 @@ export function hear(db, hzPerBin, learnedAm = null) {
   const amTones = [9,0,4].map(n=>chroma[n]/total);
   const possibleAm = Math.min(...amTones) > .025 && amTones.reduce((a,b)=>a+b,0) > .61;
   const evidence = {fingerprint,possibleAm};
-  if (learnedAm && possibleAm && similarity(fingerprint,learnedAm) > .93)
-    return {...evidence,chord:'Am',root:9,third:3};
   const options = [];
   for (let root=0;root<12;root++) for (const third of [3,4]) {
     const tones = [root,(root+third)%12,(root+7)%12].map(n=>chroma[n]/total);
@@ -48,12 +46,12 @@ export function hear(db, hzPerBin, learnedAm = null) {
     if (weakest < .055) continue;
     const coverage = tones.reduce((a,b)=>a+b,0);
     if (coverage < .69) continue;
-    // Root-position bass breaks close ties when two chord tones carry over.
-    // C and Am share C4 and E4. Open A2 plus fretted A3 are independent
-    // evidence for Am, even through a preset that emphasizes the high strings.
-    const openAm = root===9 && third===3
-      ? Math.min(fingerprint[45-40],fingerprint[57-40])*.55 : 0;
-    const score = openAm + coverage + .35*weakest + (lowest%12===root ? .075 : 0);
+    // Give each supported open voicing the same bounded root bonus.
+    const bassMidi=[40,45,50,43,48].find(n=>n%12===root);
+    const voicing=bassMidi===undefined?0:Math.min(fingerprint[bassMidi-40],fingerprint[bassMidi+12-40])*.30;
+    const learned=root===9 && third===3 && learnedAm && possibleAm
+      ? Math.max(0,similarity(fingerprint,learnedAm)-.88)*.55 : 0;
+    const score=coverage+.35*weakest+(lowest%12===root?.075:0)+voicing+learned;
     options.push({root,third,score});
   }
   options.sort((a,b)=>b.score-a.score);

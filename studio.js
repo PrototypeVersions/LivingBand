@@ -1,5 +1,6 @@
-import {hear, Player, names, similarity} from './music.js?v=quick';
+import {hear, Player, names} from './music.js?v=groove';
 import {Ensemble} from './ensemble.js?v=quick';
+import {parseChart,capturedChart,startGroove} from './backing.js';
 const el=id=>document.getElementById(id);
 let session=null, token=0;
 const meters=el('meters'), canvas=el('scope'), pen=canvas.getContext('2d');
@@ -26,6 +27,14 @@ async function devices(selected=el('device').value){
 devices().catch(()=>{});
 function stop(message='Session stopped.'){
   token++;const old=session;session=null;
+  if(old?.capture){
+    const end=Math.min(old.ctx.currentTime,old.player.lastSound+.18);
+    const chart=capturedChart(old.capture,end,old.bpm);
+    if(chart)el('chart').value=chart;
+    el('chartStatus').textContent=chart?'Review the captured chords and beat counts, then play backing.':'No chord changes captured. Try again or enter chords directly.';
+  }else if(old?.groove)el('chartStatus').textContent='Backing stopped.';
+  el('capture').textContent='Capture progression';
+  el('capture').disabled=el('groove').disabled=el('chart').disabled=el('tempo').disabled=false;
   if(old){clearInterval(old.timer);old.stream?.getTracks().forEach(t=>t.stop());old.ctx.close().catch(()=>{});}
   el('live').disabled=el('demo').disabled=false;el('stop').disabled=true;
   el('channel').disabled=true;el('channel').replaceChildren(new Option('Waiting for audio'));
@@ -34,7 +43,7 @@ function stop(message='Session stopped.'){
   el('action').textContent='Resting';el('badge').textContent='Standby';el('status').textContent=message;draw();
 }
 function resetListener(s){
-  s.learning=null;s.learnedAm=null;el('learnInfo').textContent='';el('learn').disabled=s.demo;
+  s.learning=null;s.learnedAm=null;el('learnInfo').textContent='';el('learn').disabled=s.demo||!!s.capture;
   s.player=new Player();s.band.release(s.band.voices,.08);s.band.release(s.band.responses,.04);
   s.replyEnd=0;el('note').textContent=el('chord').textContent='—';el('action').textContent='Listening';
 }
@@ -72,11 +81,13 @@ function collectAm(s,t,heard){
     el('learnInfo').textContent='No stable Am captured. Click again, then strum Am and let it ring.';
     return;
   }
-  if(!heard.possibleAm || !heard.fingerprint){capture.frames=[];return;}
-  const frames=capture.frames, frame=heard.fingerprint;
-  if(frames.length && similarity(frames[0],frame)<.88)frames.length=0;
+  // The player supplies the label. Collect several polyphonic observations
+  // from this strum without requiring that the detector already calls it Am.
+  if(!heard.fingerprint || heard.note!=null || heard.fingerprint.filter(v=>v>.12).length<3)return;
+  const frames=capture.frames,frame=heard.fingerprint;
   frames.push(frame);
-  if(frames.length<10)return;
+  el('learnInfo').textContent='Learning Am · '+frames.length+'/8';
+  if(frames.length<8)return;
   const mean=new Float32Array(frame.length);
   for(const sample of frames) sample.forEach((v,i)=>{mean[i]+=v;});
   const norm=Math.hypot(...mean);
@@ -99,19 +110,29 @@ function tick(s){
   el('note').textContent=heard.note==null?'—':names[heard.note%12]+(Math.floor(heard.note/12)-1);
   for(const event of s.player.step(t,level,heard)){
     if(event.kind==='playing'&&s.replyEnd>t){s.band.release(s.band.responses,.05);s.replyEnd=0;}
-    if(event.kind==='chord'){s.band.chord(event.root,event.third);el('chord').textContent=event.chord;}
-    if(event.kind==='answer'&&el('reply').checked)s.replyEnd=s.band.answer(event.phrase);
+    if(event.kind==='chord'){
+      if(s.capture){if(s.capture.at(-1)?.name!==event.chord)s.capture.push({at:t,name:event.chord});
+        el('chartStatus').textContent=s.capture.map(c=>c.name).join('  ·  ');}
+      else s.band.chord(event.root,event.third);
+      el('chord').textContent=event.chord;}
+    if(event.kind==='answer'&&!s.capture&&el('reply').checked)s.replyEnd=s.band.answer(event.phrase);
     if(event.kind==='rest'){s.band.release(s.band.voices,.55);el('chord').textContent='—';}
   }
   s.band.pad.gain.setTargetAtTime(heard.note!=null?.40:1,t,.16);
   el('action').textContent=s.replyEnd>t?'Answering':s.player.current?(heard.note!=null?'Making room':'Sustaining'):'Listening';
 }
-async function start(demo){
+async function start(demo,capture=false){
   stop();const id=token;
   el('live').disabled=el('demo').disabled=true;el('stop').disabled=false;
   try{
     const ctx=new AudioContext({latencyHint:'interactive'});
     const s=session={ctx,demo,player:new Player(),replyEnd:0,label:'Demo guitar'};
+    if(capture){
+      s.capture=[];s.bpm=+el('tempo').value;
+      el('capture').textContent='Finish capture';el('chart').disabled=el('tempo').disabled=true;
+      el('chartStatus').textContent='Play the progression once, then finish capture.';
+    }
+    el('groove').disabled=true;
     await ctx.resume();if(id!==token)return;
     s.band=new Ensemble(ctx,+el('level').value/100);s.band.low.gain.value=el('bass').checked?1:0;
     await ctx.audioWorklet.addModule('./channels.js');if(id!==token)return;
@@ -135,12 +156,39 @@ async function start(demo){
     s.bins=new Float32Array(s.an.frequencyBinCount);s.wave=new Float32Array(s.an.fftSize);
     el('badge').textContent=demo?'Demo playing':'Live input';el('action').textContent='Listening';
     el('status').textContent=demo?'Demo guitar plays two chords and a short phrase, then leaves room for the band.':'Pick a note to check the input.';
-    el('learn').disabled=demo;
+    el('learn').disabled=demo||capture;
     s.timer=setInterval(()=>tick(s),20);
   }catch(e){if(id===token)stop(e.name==='NotAllowedError'?'Audio access was blocked. Allow microphone access for this page in Chrome, or play the demo.':'Could not start audio. '+e.message);}
 }
+function validTempo(){
+  if(el('tempo').value && el('tempo').checkValidity())return true;
+  el('chartStatus').textContent='Choose a tempo from 40 to 220 BPM.';return false;
+}
+el('capture').onclick=()=>{
+  if(session?.capture){stop('Progression capture finished.');return;}
+  if(validTempo())start(false,true);
+};
+el('groove').onclick=async()=>{
+  if(!validTempo())return;
+  let chart;
+  try{chart=parseChart(el('chart').value);}catch(error){el('chartStatus').textContent=error.message;return;}
+  stop();const id=token;
+  try{
+    const ctx=new AudioContext({latencyHint:'interactive'});
+    const s=session={ctx,groove:true};
+    el('capture').disabled=el('groove').disabled=el('live').disabled=el('demo').disabled=true;
+    el('chart').disabled=el('tempo').disabled=true;el('stop').disabled=false;
+    await ctx.resume();if(id!==token)return;
+    s.band=new Ensemble(ctx,+el('level').value/100);s.band.low.gain.value=el('bass').checked?1:0;
+    el('badge').textContent='Backing track';el('status').textContent='Play along through your interface. Press Stop to edit the progression.';
+    el('chartStatus').textContent='Looping '+el('chart').value+' at '+el('tempo').value+' BPM.';
+    s.timer=startGroove(s.band,chart,+el('tempo').value,(name,beat)=>{
+      el('chord').textContent=name;el('action').textContent=beat;
+    });
+  }catch(error){if(id===token)stop('Could not play backing. '+error.message);}
+};
 el('live').onclick=()=>start(false);el('demo').onclick=()=>start(true);el('stop').onclick=()=>stop();
-el('device').onchange=()=>{if(session&&!session.demo)start(false);};
+el('device').onchange=()=>{if(session&&!session.demo&&!session.groove)start(false,!!session.capture);};
 el('channel').onchange=()=>{if(session?.tap){session.tap.port.postMessage(+el('channel').value);resetListener(session);}};
 el('level').oninput=()=>{el('vol').textContent=el('level').value+'%';if(session?.band)session.band.master.gain.setTargetAtTime(+el('level').value/100,session.ctx.currentTime,.03);};
 el('bass').onchange=()=>{if(session?.band)session.band.low.gain.setTargetAtTime(el('bass').checked?1:0,session.ctx.currentTime,.08);};
