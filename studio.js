@@ -1,6 +1,7 @@
 import {hear, Player, names} from './music.js?v=groove';
 import {Ensemble} from './ensemble.js?v=quick';
 import {parseChart,capturedChart,startGroove} from './backing.js';
+import {estimateTempo,StrumTimes} from './tempo.js';
 const el=id=>document.getElementById(id);
 let session=null, token=0;
 const meters=el('meters'), canvas=el('scope'), pen=canvas.getContext('2d');
@@ -29,12 +30,15 @@ function stop(message='Session stopped.'){
   token++;const old=session;session=null;
   if(old?.capture){
     const end=Math.min(old.ctx.currentTime,old.player.lastSound+.18);
-    const chart=capturedChart(old.capture,end,old.bpm);
+    const bpm=old.strums && old.capture.length ? estimateTempo(old.strums.times,old.capture) : null;
+    if(old.strums && old.capture.length)el('tempo').value=bpm??old.bpm;
+    const tempoMessage=bpm?'Estimated '+bpm+' BPM. ':old.strums?'Pulse unclear. Using '+old.bpm+' BPM. ':'';
+    const chart=capturedChart(old.capture,end,bpm??old.bpm);
     if(chart)el('chart').value=chart;
-    el('chartStatus').textContent=chart?'Review the captured chords and beat counts, then play backing.':'No chord changes captured. Try again or enter chords directly.';
+    el('chartStatus').textContent=chart?tempoMessage+'Review the captured chords and beat counts, then play backing.':'No chord changes captured. Try again or enter chords directly.';
   }else if(old?.groove)el('chartStatus').textContent='Backing stopped.';
   el('capture').textContent='Capture progression';
-  el('capture').disabled=el('groove').disabled=el('chart').disabled=el('tempo').disabled=false;
+  el('autoTempo').disabled=el('capture').disabled=el('groove').disabled=el('chart').disabled=el('tempo').disabled=false;
   if(old){clearInterval(old.timer);old.stream?.getTracks().forEach(t=>t.stop());old.ctx.close().catch(()=>{});}
   el('live').disabled=el('demo').disabled=false;el('stop').disabled=true;
   el('channel').disabled=true;el('channel').replaceChildren(new Option('Waiting for audio'));
@@ -105,6 +109,7 @@ function tick(s){
   s.an.getFloatTimeDomainData(s.wave);s.an.getFloatFrequencyData(s.bins);
   let energy=0;for(let i=s.wave.length-1024;i<s.wave.length;i++)energy+=s.wave[i]**2;
   const level=Math.sqrt(energy/1024), heard=level>.002?hear(s.bins,s.ctx.sampleRate/s.an.fftSize,s.learnedAm):{};
+  if(s.strums)s.strums.observe(t,s.bins,s.ctx.sampleRate/s.an.fftSize,level);
   if(s.learning) collectAm(s,t,heard);
   draw(s.wave.subarray(s.wave.length-1024));
   el('note').textContent=heard.note==null?'—':names[heard.note%12]+(Math.floor(heard.note/12)-1);
@@ -128,7 +133,9 @@ async function start(demo,capture=false){
     const ctx=new AudioContext({latencyHint:'interactive'});
     const s=session={ctx,demo,player:new Player(),replyEnd:0,label:'Demo guitar'};
     if(capture){
-      s.capture=[];s.bpm=+el('tempo').value;
+      s.capture=[];s.bpm=el('tempo').value && el('tempo').checkValidity()?Number(el('tempo').value):84;
+      if(el('autoTempo').checked)s.strums=new StrumTimes();
+      el('autoTempo').disabled=true;
       el('capture').textContent='Finish capture';el('chart').disabled=el('tempo').disabled=true;
       el('chartStatus').textContent='Play the progression once, then finish capture.';
     }
@@ -166,7 +173,7 @@ function validTempo(){
 }
 el('capture').onclick=()=>{
   if(session?.capture){stop('Progression capture finished.');return;}
-  if(validTempo())start(false,true);
+  if(el('autoTempo').checked || validTempo())start(false,true);
 };
 el('groove').onclick=async()=>{
   if(!validTempo())return;
